@@ -7,14 +7,18 @@ import (
 	"syscall"
 
 	"github.com/go-telegram-bot-api/telegram-bot-api"
+	appbot "github.com/kulaginds/tg-replay-bot/internal/app/bot"
+	chatbot "github.com/kulaginds/tg-replay-bot/internal/app/chat"
+	"github.com/kulaginds/tg-replay-bot/internal/pkg/router"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
 const (
-	envTelegramSecretToken = "ENV_TELEGRAM_SECRET_TOKEN"
-	envTelegramOffset      = "ENV_TELEGRAM_OFFSET"
+	envTelegramSecretToken = "TELEGRAM_SECRET_TOKEN"
+	envTelegramOffset      = "TELEGRAM_OFFSET"
+	envTelegramChatID      = "TELEGRAM_CHAT_ID"
 
 	updateTimeout = 60 // seconds
 )
@@ -60,6 +64,15 @@ func main() {
 		logger.Infof("Set offset to %d", offset)
 	}
 
+	chat := os.Getenv(envTelegramChatID)
+	if chat == "" {
+		logger.Fatal("telegram chat id is empty")
+	}
+	chatID, err := strconv.ParseInt(chat, 10, 64)
+	if err != nil {
+		logger.Fatal(errors.Wrap(err, "cannot parse chat id"))
+	}
+
 	logger.Info("Init application")
 
 	bot, err := tgbotapi.NewBotAPI(token)
@@ -75,7 +88,14 @@ func main() {
 		logger.Fatal(errors.Wrap(err, "cannot get updates"))
 	}
 
-	go handler(logger, bot, updates)
+	errCh := make(chan error)
+
+	botHandler := appbot.New(bot, errCh)
+	chatHandler := chatbot.New(bot, errCh, chatID)
+
+	r := router.New(botHandler, chatHandler)
+
+	go r.Route(updates)
 	logger.Error("Start listening messages")
 
 	done := make(chan os.Signal, 1)
@@ -85,24 +105,4 @@ func main() {
 	logger.Error("Gracefully shutdown.")
 
 	bot.StopReceivingUpdates()
-}
-
-func handler(logger *zap.SugaredLogger, bot *tgbotapi.BotAPI, updates <-chan tgbotapi.Update) {
-	var err error
-
-	for update := range updates {
-		if update.Message == nil { // ignore any non-Message Updates
-			continue
-		}
-
-		logger.Infof("[%s] %s", update.Message.From.UserName, update.Message.Text)
-
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, update.Message.Text)
-		msg.ReplyToMessageID = update.Message.MessageID
-
-		_, err = bot.Send(msg)
-		if err != nil {
-			logger.Error(errors.Wrap(err, "cannot send message"))
-		}
-	}
 }
