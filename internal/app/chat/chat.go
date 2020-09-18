@@ -5,25 +5,38 @@ import (
 	"github.com/pkg/errors"
 )
 
+type searchEngine interface {
+	AddQuery(query string)
+	HasQueries(text string) bool
+}
+
 type impl struct {
 	bot   *tgbotapi.BotAPI
 	errCh chan<- error
 
 	chatID int64
+
+	searchEngine searchEngine
 }
 
-func New(bot *tgbotapi.BotAPI, errCh chan<- error, chatID int64) *impl {
+func New(bot *tgbotapi.BotAPI, errCh chan<- error, chatID int64, searchEngine searchEngine) *impl {
+	searchEngine.AddQuery("hello")
+	searchEngine.AddQuery("hey world")
+
 	return &impl{
-		bot:    bot,
-		errCh:  errCh,
-		chatID: chatID,
+		bot:          bot,
+		errCh:        errCh,
+		chatID:       chatID,
+		searchEngine: searchEngine,
 	}
 }
 
 func (i *impl) Receive(message *tgbotapi.Message) {
-	msg := tgbotapi.NewMessage(i.chatID, message.Text)
-	//msg := tgbotapi.NewMessageToChannel("@tg_reply_bot_privcha", update.Message.Text)
-	//msg.ReplyToMessageID = update.Message.MessageID
+	if !i.searchEngine.HasQueries(message.Text) {
+		return
+	}
+
+	msg := tgbotapi.NewForward(i.chatID, message.Chat.ID, message.MessageID)
 
 	_, err := i.bot.Send(msg)
 	if err != nil {

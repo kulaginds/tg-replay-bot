@@ -10,6 +10,7 @@ import (
 	appbot "github.com/kulaginds/tg-replay-bot/internal/app/bot"
 	chatbot "github.com/kulaginds/tg-replay-bot/internal/app/chat"
 	"github.com/kulaginds/tg-replay-bot/internal/pkg/router"
+	"github.com/kulaginds/tg-replay-bot/internal/pkg/search/engine"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -28,7 +29,7 @@ func main() {
 
 	bot, updates := prepareBotWithUpdates(token, offset, logger)
 
-	listenAndHandleBotUpdates(bot, updates, chatID)
+	listenAndHandleBotUpdates(bot, updates, chatID, logger)
 
 	logger.Error("Bot started")
 
@@ -126,15 +127,23 @@ func prepareBotWithUpdates(token string, offset int, logger *zap.SugaredLogger) 
 	return bot, updates
 }
 
-func listenAndHandleBotUpdates(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, chatID int64) {
+func listenAndHandleBotUpdates(bot *tgbotapi.BotAPI, updates tgbotapi.UpdatesChannel, chatID int64, logger *zap.SugaredLogger) {
 	errCh := make(chan error)
 
+	searchEngine := engine.New()
 	botHandler := appbot.New(bot, errCh)
-	chatHandler := chatbot.New(bot, errCh, chatID)
+	chatHandler := chatbot.New(bot, errCh, chatID, searchEngine)
 
 	r := router.New(botHandler, chatHandler)
 
 	go r.Route(updates)
+	go logErrors(errCh, logger)
+}
+
+func logErrors(errCh <-chan error, logger *zap.SugaredLogger) {
+	for err := range errCh {
+		logger.Error(err)
+	}
 }
 
 func waitSignalForGracefullyShutdown(bot *tgbotapi.BotAPI, logger *zap.SugaredLogger) {
